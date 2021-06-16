@@ -182,7 +182,6 @@ def R1_pareto(*datalists: list):
     """
     plt.figure(figsize=(12, 7))
     for dtl in datalists:
-        print(dtl[0])
         points = [[float(samp["costs"]["LCOC"]), float(samp["risk"]["ECNS"]), round(
             samp["emissions"]["emitted"])] for samp in dtl[1]]
         points = sorted(points, key=lambda x: x[1])
@@ -190,7 +189,7 @@ def R1_pareto(*datalists: list):
         y = np.array([max(p[1], 0) for p in points])
         z = np.array([p[2] for p in points])
         r1 = 1 - y/np.max(y)
-        plt.plot(x, r1, linewidth=1, linestyle="dashed",
+        plt.plot(x, r1, linewidth=1, marker="o", linestyle="dashed",
                  markersize=8, label=dtl[0])
     plt.xlabel("LCOC (EUR/tCO2)")
     plt.ylabel("$R_1$")
