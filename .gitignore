@@ -1,3 +1,6 @@
 .vs*
 .ipy*
 venv*
+inputs/*
+output/*
+report/*

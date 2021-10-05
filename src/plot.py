@@ -3,8 +3,28 @@ from matplotlib import pyplot as plt
 
 
 def cost_breakdown(data):
+    if data["Y"] == 1:
+        return singleyear_breakdown(data)
+    else:
+        return multiyear_breakdown(data)
+
+
+def singleyear_breakdown(data):
+    """Plots the single year breakdown
     """
-    Plots the cost breakdown of a value chain and saves an svg in the output folder.
+    fig = plt.figure(figsize=(12, 12))
+    pms = {  # params
+        "sp1": {
+
+        }
+    }
+
+    # SUBPLOT 1
+    sp1 = fig.add_subplot(111)
+
+
+def multiyear_breakdown(data):
+    """Plots the cost breakdown of a value chain and saves an svg in the output folder.
 
     Args:
         data (obj) : Output of the src.read.get_data function
@@ -70,15 +90,15 @@ def cost_breakdown(data):
     c = pms["sp2"]["colors"]
     sp2 = fig.add_subplot(412)
 
-    if "LCAC" in data["costs"] and "LCSC" in data["costs"]:
-        LCAC, LCSC = data["costs"]["LCAC"], data["costs"]["LCSC"]
-    else:
-        LCAC = data["costs"]["yearly"] * \
-            data["r"] / data["emissions"]["avoided"]
-        LCSC = data["costs"]["yearly"] * \
-            data["r"] / data["emissions"]["stored"]
-    if type(LCAC) != list:
+    LCAC = data["costs"]["yearly"] * \
+        data["r"] / data["emissions"]["avoided"]
+    LCAC[LCAC < 0] = None
+    LCSC = data["costs"]["yearly"] * \
+        data["r"] / data["emissions"]["stored"]
+
+    if data["Y"] == 1:
         LCAC, LCSC = [LCAC], [LCSC]
+
     for y, cost in enumerate(LCAC):
         _ = sp2.hlines(cost, y, y+1, linestyle='--', color="purple")
         if y == 0:
@@ -173,26 +193,124 @@ def cost_breakdown(data):
     plt.show()
 
 
-def R1_pareto(*datalists: list):
+def compare(dataA, dataB, title="Comparaison", filename='compare'):
+    """Compare two output files.
+    """
+
+    # INIT
+    fig = plt.figure(figsize=(12, 12))
+    pms = {
+        "colors": ["red", "blue"],
+        "sp1": {
+            "width": 2
+        }
+    }
+
+    # sp1
+    w = pms["sp1"]["width"]
+    sp1 = fig.add_subplot(411)
+    sp1.vlines(0, 0, 1)
+    sp1.barh(-0.3, w, align='center')
+
+    # Costs
+
+    plt.xlabel("Percentage change (in %)")
+    sp1.legend()
+    sp1.set_title(title)
+    plt.savefig(f"output/{filename}.svg")
+    plt.savefig(f"output/{filename}.png")
+    plt.show()
+
+
+def R1_pareto(datalists: list, title="Add title as a parameter: title=' '", show_emissions=False, show_risk=True, show_recovery=True, filename="R1_pareto", return_plot=False):
     """
     Plots the R1-cost pareto for multiple value chains and saves svg in output folder.
 
     Args: (one or more)
         datalist (list of [str, list(src.read.get_data)])
     """
-    plt.figure(figsize=(12, 7))
+    fig = plt.figure(figsize=(12, 12))
+    print("-- v1.1")
+
+    if show_emissions:
+        sp1 = fig.add_subplot(211)
+        sp2 = fig.add_subplot(212)
+        sp2.set_ylabel("Emissions")
+        sps = [sp1, sp2]
+    else:
+        sp1 = fig.add_subplot(111)
+        sps = [sp1]
+    sp1.set_ylabel("$R_1$")
+
     for dtl in datalists:
-        points = [[float(samp["costs"]["LCOC"]), float(samp["risk"]["ECNS"]), round(
-            samp["emissions"]["emitted"])] for samp in dtl[1]]
-        points = sorted(points, key=lambda x: x[1])
+        label, data, color = dtl.get("label", "Undefined"), dtl.get(
+            "data", []), dtl.get("color", "blue")
+        points = [[float(samp["costs"]["LCSC_nom"]), float(samp["risk"]["NECNS"][0]), float(samp["risk"]["NECNS"][1]), round(
+            samp["emissions"]["emitted"]), round(np.sum(samp["risk"]["RFEE"]))] for samp in data]
+        points = sorted(points, key=lambda x: x[0])
         x = np.array([max(p[0], 1) for p in points])
-        y = np.array([max(p[1], 0) for p in points])
-        z = np.array([p[2] for p in points])
-        r1 = 1 - y/np.max(y)
-        plt.plot(x, r1, linewidth=1, marker="o", linestyle="dashed",
-                 markersize=8, label=dtl[0])
-    plt.xlabel("LCOC (EUR/tCO2)")
-    plt.ylabel("$R_1$")
-    plt.legend()
-    plt.savefig("output/r1-pareto.svg")
+        ybefore = np.array([max(p[1], 0)
+                            for p in points])              # ecns before action
+        yafter = np.array([max(p[2], 0) for p in points])  # ecns after  action
+        z = np.array([p[3] for p in points])
+        w = np.array([p[4] for p in points])
+        r1before = 1 - ybefore/np.max(ybefore)
+        r1after = 1 - yafter/np.max(yafter)
+
+        if show_risk:
+            sp1.plot(x, r1before, linewidth=1, marker="x",
+                     markersize=8, label=label + " (risk)", alpha=0.8, color=color)
+
+        if show_recovery:
+            sp1.plot(x, r1after, linewidth=1, marker="o",
+                     markersize=8, alpha=0.8, label=label + " (recovery)", color=color)
+
+        if show_emissions:
+            sp2.plot(x, z,   label=label + ' (total emissions)',
+                     color=color)
+            sp2.plot(x, z-w, linestyle="dashed", alpha=.7,
+                     label=label + ' (nom emissions)', color=color)
+            sp2.set_title("Emissions vs LCOC")
+            sp2.legend()
+
+    plt.xlabel("LCOC [EUR/tCO2]")
+    sp1.legend()
+    sp1.set_title(title)
+    plt.savefig(f"output/{filename}.svg")
+    plt.savefig(f"output/{filename}.png")
+    if return_plot:
+        return dict(fig=fig, sps=sps)
     plt.show()
+
+
+def emissions_pareto(datalists: list, title="Add title as a parameter: title=' '", filename="Emissions_pareto", return_plot=False):
+    """Plots the emissions-cost pareto for multiple value chains and saves svg in output folder.
+
+    Args:
+        datalist : (list of [str, list(src.read.get_data)])
+        title (optional : str) : Plot title name
+        filename (optional : str) : Name of the output file
+        return_plot (optional : bool) : Returns the output plot object
+    """
+    fig = plt.figure(figsize=(12, 12))
+    sp1 = fig.add_subplot(111)
+    sp1.set_title(title)
+    sp1.set_ylabel("Emissions [tCO2/yr]")
+    sp1.set_xlabel("LCAC [EUR/tCO2]")
+
+    for dtl in datalists:
+        label, data, color = dtl.get("label", "Undefined"), dtl.get(
+            "data", []), dtl.get("color", "blue")
+        points = [[float(samp["costs"]["LCSC_nom"]), float(
+            samp["emissions"]["emitted"]), float(samp["risk"]["f_emissions"])] for samp in data]
+        points = sorted(points, key=lambda x: x[0])
+        x = np.array([max(p[0], 1) for p in points])
+        y = np.array([p[1] for p in points])
+        z = np.array([p[2] for p in points])
+        sp1.plot(x, y + z, linewidth=1, marker="x",
+                 markersize=8, label=label + " total emissions", alpha=0.4, color=color)
+        sp1.plot(x, z, linewidth=1, marker="o",
+                 markersize=8, label=label + " failure emissions", alpha=0.4, color=color)
+    sp1.legend()
+    if return_plot:
+        return dict(fig=fig, sps=[sp1])

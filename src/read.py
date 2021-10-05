@@ -6,8 +6,7 @@ from .constants import *
 
 
 def get_capture_costs(struct, r):
-    """
-    Get capture components cost.
+    """Get capture components cost.
     """
     costs = {
         "capex": 0.,
@@ -51,8 +50,7 @@ def get_capture_costs(struct, r):
 
 
 def get_storage_costs(struct, r):
-    """
-    Get storage components cost.
+    """Get storage components cost.
     """
     costs = {
         "capex": 0.,
@@ -95,8 +93,7 @@ def get_storage_costs(struct, r):
 
 
 def get_network_costs(struct, r):
-    """
-    Get network cost.
+    """Get network cost.
     """
     costs = {
         "opex": {
@@ -148,8 +145,7 @@ def get_network_costs(struct, r):
 
 
 def get_network_emissions(networks):
-    """
-    Get network emissions.
+    """Get network emissions.
     """
     emissions = 0
     nws = [i for i in networks.dtype.names if i != 'nodeNames']
@@ -159,9 +155,26 @@ def get_network_emissions(networks):
     return emissions
 
 
-def get_condition_data(struct, r):
+def get_plant_details(struct):
+    """Get plant details.
     """
-    Get conditioning cost and emission.
+    Y = struct["horizon"][()]["number"].item()
+    nbr_plants = len(struct["component"][()]["CCS_CO2"][()])
+    connected = np.zeros([nbr_plants, Y])
+    forgotten_emissions = np.zeros([nbr_plants, Y])
+    for i, plant in enumerate(struct["component"][()]["CCS_CO2"][()]):
+        connected[i, :] = plant["emissionscaptured"][()] > 1
+        forgotten_emissions[i, :] = np.logical_not(
+            connected[i, :]).astype(int) * plant["input"][()][0]
+
+    return {
+        "connected_to_co2_network": np.sum(connected, axis=0),
+        "forgotten_emissions": np.sum(forgotten_emissions, axis=0)
+    }
+
+
+def get_condition_data(struct, r):
+    """Get conditioning cost and emission.
     """
 
     Y = struct["horizon"][()]["number"].item()
@@ -210,6 +223,8 @@ def get_data(path):
     data["Y"] = struct["horizon"][()]["number"].item()
     data["discRate"] = struct["analysis"][()]["eco"][()]["discRate"].item()
     data["r"] = (1 + data["discRate"])**np.arange(0, data["Y"])
+    data["modes"] = ", ".join(
+        [i for i in struct["network"][()].dtype.names if i != 'nodeNames'])
 
     # Costs
     data["costs"] = {
@@ -223,14 +238,17 @@ def get_data(path):
         "mainexY": struct["maintenance_costsY"].tolist(),
     }
 
+    data["costs"]["yearly"] = (
+        data["costs"]["capexY"] + data["costs"]["opexY"] + data["costs"]["mainexY"])
+
     try:
         data["costs"]["LCSC"] = struct["LCSC"]
+        data["costs"]["LCSC_nom"] = struct["LCSC_nom"]
+        data["costs"]["LCAC_nom"] = struct["LCAC_nom"]
         data["costs"]["LCAC"] = struct["LCAC"]
     except:
         pass
 
-    data["costs"]["yearly"] = (
-        data["costs"]["capexY"] + data["costs"]["opexY"] + data["costs"]["mainexY"])
     data["costs"]["capture"] = get_capture_costs(struct, data["r"])
     data["costs"]["storage"] = get_storage_costs(struct, data["r"])
     data["costs"]["network"] = get_network_costs(struct, data["r"])
@@ -251,11 +269,43 @@ def get_data(path):
     data["costs"]["condition"], data["emissions"]["condition"] = get_condition_data(
         struct, data["r"])
 
+    data["network"] = {
+        "plants": get_plant_details(struct)
+    }
+
     # Risk
     data["risk"] = {}
+
     try:
-        data["risk"]["ECNS"] = struct["carbonNotStored"].tolist()
-    except:
-        data["risk"]["ECNS"] = struct["demandNotSupplied"].tolist()
+        data["risk"]["ECNS"] = struct["risk"][()]['ECNS'][()]
+        data["risk"]["ECS"] = struct["risk"][()]["ECS"][()]
+        data["risk"]["NECNS"] = struct["risk"][()]["NECNS"][()]
+        data["risk"]["LCSC"] = struct["risk"][()]["LCSC"][()]
+        data["risk"]["RFEE"] = struct["risk"][()]["RFEE"][()]
+        data["risk"]["p_nofail"] = struct["risk"][()]["p_nofail"][()]
+    except ValueError:
+        pass
+
+    try:
+        data["risk"]["f_emissions"] = struct["f_emissions"][()]
+        data["risk"]["f_emissionsdY"] = struct["f_emissionsdY"][()]
+    except ValueError:
+        pass
+
+    # Optional
+    data["struct"] = struct
 
     return data
+
+
+def check_validity(path):
+    """Checks if the output file is valid and is not the result of unfeasible problem
+    """
+    struct = scipy.io.loadmat(path, squeeze_me=True)["object"]
+    diagnostic = struct["diagnostic"][()]
+    info = diagnostic["info"]
+    problem = diagnostic["problem"]
+    if problem == 1:
+        print(f"> {info}: " + path)
+        return False
+    return True
